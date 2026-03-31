@@ -1,97 +1,91 @@
 const http = require("http");
 const WebSocket = require("ws");
+const crypto = require("crypto");
 
 const PORT = process.env.PORT || 3000;
 
-// Create HTTP server (required for Railway)
 const server = http.createServer((req, res) => {
   if (req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.writeHead(200);
     res.end("OK");
     return;
   }
-
-  res.writeHead(200, { "Content-Type": "text/plain" });
-  res.end("Multiplayer server running");
+  res.end("Running");
 });
 
-// Attach WebSocket server
 const wss = new WebSocket.Server({ server });
 
-// Store players
 const players = new Map();
+const sockets = new Map();
 
-// Broadcast helper
-function broadcast(data) {
-  const message = JSON.stringify(data);
-
-  for (const client of wss.clients) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
-    }
+function broadcast(data, exclude = null) {
+  const msg = JSON.stringify(data);
+  for (const [id, ws] of sockets) {
+    if (id === exclude) continue;
+    if (ws.readyState === WebSocket.OPEN) ws.send(msg);
   }
 }
 
-// Handle new connections
+function makeId() {
+  return crypto.randomBytes(4).toString("hex");
+}
+
 wss.on("connection", (ws) => {
-  console.log("New player connected");
+  const id = makeId();
 
-  const id = Math.random().toString(36).substring(2, 10);
-
-  const player = {
-    id,
-    x: 100,
-    y: 100,
-  };
-
+  const player = { id, username: "Guest", x: 100, y: 100 };
   players.set(id, player);
+  sockets.set(id, ws);
 
-  ws.send(
-    JSON.stringify({
-      type: "init",
-      selfId: id,
-      players: Array.from(players.values()),
-    })
-  );
+  ws.send(JSON.stringify({
+    type: "init",
+    selfId: id,
+    players: [...players.values()]
+  }));
 
-  broadcast({
-    type: "join",
-    player,
-  });
+  broadcast({ type: "join", player }, id);
 
-  ws.on("message", (message) => {
+  ws.on("message", (msg) => {
+    let data;
     try {
-      const data = JSON.parse(message.toString());
+      data = JSON.parse(msg);
+    } catch {
+      return;
+    }
 
-      if (data.type === "move") {
-        const player = players.get(id);
-        if (!player) return;
+    if (data.type === "join" && data.username) {
+      player.username = data.username;
+      broadcast({ type: "update", player });
+    }
 
-        player.x = data.x;
-        player.y = data.y;
+    if (data.type === "move") {
+      player.x = data.x;
+      player.y = data.y;
+      broadcast({ type: "update", player });
+    }
 
-        broadcast({
-          type: "update",
-          player,
-        });
-      }
-    } catch (err) {
-      console.error("Invalid message:", err);
+    if (data.type === "shoot") {
+      broadcast({
+        type: "shoot",
+        projectile: {
+          id: makeId(),
+          ownerId: id,
+          x: player.x,
+          y: player.y,
+          vx: data.vx,
+          vy: data.vy
+        }
+      });
     }
   });
 
   ws.on("close", () => {
-    console.log("Player disconnected:", id);
-
     players.delete(id);
-
-    broadcast({
-      type: "leave",
-      id,
-    });
+    sockets.delete(id);
+    broadcast({ type: "leave", id });
   });
 });
 
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log("Server running on", PORT);
 });
