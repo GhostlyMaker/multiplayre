@@ -1,7 +1,6 @@
 {
   "name": "multiplayer-server",
   "version": "1.0.0",
-  "description": "WebSocket multiplayer server for browser game",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
