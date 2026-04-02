@@ -39,6 +39,7 @@ function safeSend(ws, data) {
 
 function broadcast(data, excludePlayerId = null) {
   const payload = JSON.stringify(data);
+
   for (const [playerId, ws] of sockets.entries()) {
     if (excludePlayerId && playerId === excludePlayerId) continue;
     if (ws.readyState === WebSocket.OPEN) {
@@ -74,6 +75,21 @@ function buildPlayersArray() {
   }));
 }
 
+function normalizeItem(item) {
+  return {
+    instanceId: item.instanceId || makeId("itm_"),
+    itemType: item.itemType || "Unknown Item",
+    name: item.name || item.itemType || "Unknown Item",
+    slot: item.slot || "misc",
+    rarity: item.rarity || "common",
+    allowedClasses: Array.isArray(item.allowedClasses) ? item.allowedClasses : [],
+    stats: item.stats || {},
+    description: item.description || "",
+    icon: item.icon || null,
+    tier: item.tier || null,
+  };
+}
+
 function serializeBag(bag) {
   const age = now() - bag.createdAt;
   const timeRemainingMs = Math.max(0, bag.expiresAt - now());
@@ -87,18 +103,7 @@ function serializeBag(bag) {
     expiresAt: bag.expiresAt,
     timeRemainingMs,
     isFading: age >= BAG_FADE_START_MS,
-    items: bag.items.map((item) => ({
-      instanceId: item.instanceId,
-      itemType: item.itemType || "Unknown Item",
-      name: item.name || item.itemType || "Unknown Item",
-      slot: item.slot || "misc",
-      rarity: item.rarity || "common",
-      allowedClasses: Array.isArray(item.allowedClasses) ? item.allowedClasses : [],
-      stats: item.stats || {},
-      description: item.description || "",
-      icon: item.icon || null,
-      tier: item.tier || null,
-    })),
+    items: bag.items.map(normalizeItem),
   };
 }
 
@@ -115,18 +120,7 @@ function createBag({ x, y, ownerId, items }) {
     x: clampNumber(x, 100),
     y: clampNumber(y, 100),
     ownerId: ownerId || null,
-    items: items.map((item) => ({
-      instanceId: item.instanceId || makeId("itm_"),
-      itemType: item.itemType || "Unknown Item",
-      name: item.name || item.itemType || "Unknown Item",
-      slot: item.slot || "misc",
-      rarity: item.rarity || "common",
-      allowedClasses: Array.isArray(item.allowedClasses) ? item.allowedClasses : [],
-      stats: item.stats || {},
-      description: item.description || "",
-      icon: item.icon || null,
-      tier: item.tier || null,
-    })),
+    items: items.map(normalizeItem),
     createdAt,
     expiresAt: createdAt + BAG_LIFETIME_MS,
   };
@@ -216,6 +210,7 @@ wss.on("connection", (ws) => {
 
   ws.on("message", (raw) => {
     let data;
+
     try {
       data = JSON.parse(raw.toString());
     } catch {
@@ -242,7 +237,6 @@ wss.on("connection", (ws) => {
         currentPlayer.dirX = clampNumber(data.dirX, currentPlayer.dirX);
         currentPlayer.dirY = clampNumber(data.dirY, currentPlayer.dirY);
         currentPlayer.isMoving = Boolean(data.isMoving);
-
         broadcast({ type: "update", player: currentPlayer });
         break;
       }
@@ -255,6 +249,7 @@ wss.on("connection", (ws) => {
 
       case "dropItem": {
         const item = data.item;
+
         if (!item || typeof item !== "object") {
           safeSend(ws, { type: "dropRejected", reason: "Missing item payload" });
           break;
@@ -282,7 +277,10 @@ wss.on("connection", (ws) => {
         const instanceId = typeof data.instanceId === "string" ? data.instanceId : null;
 
         if (!bagId || !instanceId) {
-          safeSend(ws, { type: "claimRejected", reason: "Missing bagId or instanceId" });
+          safeSend(ws, {
+            type: "claimRejected",
+            reason: "Missing bagId or instanceId",
+          });
           break;
         }
 
@@ -310,6 +308,7 @@ wss.on("connection", (ws) => {
       case "syncBagState": {
         const bagId = typeof data.bagId === "string" ? data.bagId : null;
         const bag = bagId ? bags.get(bagId) : null;
+
         if (bag) {
           safeSend(ws, { type: "bagUpdate", bag: serializeBag(bag) });
         }
@@ -365,9 +364,4 @@ setInterval(() => {
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-});
-});
-
-server.listen(PORT, () => {
-  console.log("Server running on", PORT);
 });
